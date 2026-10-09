@@ -1,0 +1,13 @@
+{
+  "name": "defsystem",
+  "owner": {
+    "name": "Gaurav Sharma"
+  },
+  "plugins": [
+    {
+      "name": "defsystem",
+      "source": "./"
+    }
+  ],
+  "description": "Marketplace for defsystem, the defsys design-system skill bundled into a side panel for Claude Code."
+}

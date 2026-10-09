@@ -1,0 +1,6 @@
+defsystem
+Copyright 2026 Gaurav Sharma. This project is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This project bundles the design-system-definer skill in resources/defsys.
+That skill is licensed under the MIT License, Copyright 2026 Gaurav Sharma
+(see resources/defsys/LICENSE).

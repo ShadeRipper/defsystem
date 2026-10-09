@@ -1,0 +1,9 @@
+{
+  "name": "defsystem",
+  "version": "0.6.0",
+  "description": "defsystem bundles the design-system-definer (defsys) skill, so it needs no other plugin: a side panel to set up, review and sign off a design system, an indicator above the chat, the answers and token tree with preview, the sign-off gate, and read-only tools for the model.",
+  "author": {
+    "name": "Gaurav Sharma"
+  },
+  "types": "./types/index.d.ts"
+}
