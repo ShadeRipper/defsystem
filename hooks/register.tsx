@@ -816,7 +816,8 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const actions = {
-      tab: (value: Tab) => update($, viewAtom, prev => (TABS.has(value) ? { ...prev, tab: value } : prev)),
+      // A message belongs to what the person just did, so switching tabs clears it.
+      tab: (value: Tab) => update($, viewAtom, prev => (TABS.has(value) ? { ...prev, tab: value, message: '' } : prev)),
       pick: (value: string) => update($, viewAtom, prev => ({ ...prev, pick: value, edit: null, message: '' })),
       preview: async (text: string) => {
         const { edit, message } = await previewEdit($, (await read($, viewAtom)).pick, text)
