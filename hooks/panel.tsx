@@ -13,12 +13,14 @@
 // option list that could be longer than 64 entries, and keep every list in this file within those limits.
 import type { EngineInterface } from 'claude-code'
 
-import type { PanelView, SetupStep, SignOff, StageState, Tab, TokenCollection } from '../types'
+import type { ImproveStep, PanelView, SetupStep, SignOff, StageState, Tab, TokenCollection } from '../types'
 import {
   countLeaves,
   editSummary,
   hunksOnly,
+  improveStatus,
   indexVariables,
+  inventoryLine,
   pickGroups,
   pickOptions,
   resolvePick,
@@ -45,9 +47,94 @@ export type Actions = {
   unlink: () => unknown
   startInterview: () => unknown
   stopInterview: () => unknown
+  // "Improve a Figma design system file": start or re-check, give the link, ask Claude again, stop (disconnect), link the
+  // project to the file that was read, and put the improvement request in the prompt box.
+  improveStart: () => unknown
+  improveLink: (text: string) => unknown
+  improveAsk: () => unknown
+  improveStop: () => unknown
+  improveConnect: () => unknown
+  improveWith: () => unknown
 }
 
+export type ImproveActions = Pick<
+  Actions,
+  'improveStart' | 'improveLink' | 'improveAsk' | 'improveStop' | 'improveConnect' | 'improveWith'
+>
+
 type Elements = ReturnType<EngineInterface['ui']['resolve']>
+
+const IMPROVE_TITLE = 'Improve a Figma design system file'
+const IMPROVE_LABEL: Record<ImproveStep, string> = {
+  off: `${IMPROVE_TITLE}   ›`,
+  connect: 'Connect Figma to continue',
+  link: 'Waiting for the Figma link',
+  reading: 'Reading the file…',
+  connected: 'Connected',
+}
+const FIGMA_LINK_PLACEHOLDER = 'https://www.figma.com/design/…'
+const HEX = /#[0-9a-fA-F]{6}\b/
+
+// The updater above the chat for the Figma option. Null while the option is off, so the band draws nothing for it. It
+// asks for what is missing, in order: the Figma connection, then the file's link; then it waits for Claude to read
+// the file; and last it shows the file's counts and a Connected button. It is drawn in the band, so it holds only a few
+// rows: a title, one line, the field and the buttons.
+export function improveUpdater(els: Elements, v: PanelView, act: ImproveActions) {
+  const { Box, Text, Button } = els
+  const Input = 'Input' in els ? els.Input : undefined
+  const im = v.improve
+  if (!im.busy && im.step === 'off') return null
+  return (
+    <Box flexDirection="column" borderStyle="round" paddingX={1}>
+      <Text color="claude" bold>{`${MARK} defsys · ${IMPROVE_TITLE}`}</Text>
+      {im.busy ? (
+        <Text dimColor wrap="wrap">{`${DETAIL} Loading… checking the Figma connection.`}</Text>
+      ) : im.step === 'connect' ? (
+        <Box flexDirection="column">
+          <Text color="warning" wrap="wrap">Figma is not connected to this chat.</Text>
+          <Text dimColor wrap="wrap">{`${DETAIL} ${improveStatus(im)}`}</Text>
+          <Box flexDirection="row" gap={2}>
+            <Button key="band-check" label="Check again" onPress={act.improveStart} />
+            <Button key="band-cancel" label="Cancel" plain onPress={act.improveStop} />
+          </Box>
+        </Box>
+      ) : im.step === 'link' ? (
+        <Box flexDirection="column">
+          <Text wrap="wrap">Paste the link of the Figma file to improve.</Text>
+          {Input !== undefined ? (
+            <Input
+              key="band-link"
+              label="Figma file link"
+              placeholder={FIGMA_LINK_PLACEHOLDER}
+              submitLabel="Read the file"
+              onSubmit={act.improveLink}
+            />
+          ) : (
+            <Text dimColor wrap="wrap">{`${DETAIL} Paste the link in the chat box and press Enter.`}</Text>
+          )}
+          <Button key="band-cancel" label="Cancel" plain onPress={act.improveStop} />
+        </Box>
+      ) : im.step === 'reading' ? (
+        <Box flexDirection="column">
+          <Text wrap="wrap">{`Claude is reading ${im.file?.title ?? 'the file'} in the chat…`}</Text>
+          <Text dimColor wrap="wrap">{`${DETAIL} The details appear here when Claude has written ds-figma-inventory.json.`}</Text>
+          <Box flexDirection="row" gap={2}>
+            <Button key="band-ask" label="Ask again" onPress={act.improveAsk} />
+            <Button key="band-cancel" label="Cancel" plain onPress={act.improveStop} />
+          </Box>
+        </Box>
+      ) : (
+        <Box flexDirection="column">
+          <Text color="success" wrap="wrap">{`✔ ${im.inventory?.fileName ?? 'Figma file'} · ${im.inventory ? inventoryLine(im.inventory) : ''}`}</Text>
+          <Box flexDirection="row" gap={2}>
+            <Button key="band-connected" label="Connected" variant="primary" onPress={act.improveConnect} />
+            <Button key="band-disconnect" label="Disconnect" plain onPress={act.improveStop} />
+          </Box>
+        </Box>
+      )}
+    </Box>
+  )
+}
 
 const MARK = '✻'
 const DETAIL = '⎿'
@@ -170,7 +257,9 @@ export function panel(els: Elements, v: PanelView, act: Actions, surface: string
       {hasDesign && <Text dimColor>{`${bar} ${done}/${v.stages.length} stages`}</Text>}
       {v.message !== '' && <Text dimColor wrap="wrap">{`${DETAIL} ${v.message}`}</Text>}
       {v.tokensError !== '' && <Text color="error" wrap="wrap">{`${DETAIL} ${v.tokensError}`}</Text>}
-      {v.link !== null && <Text color="suggestion" wrap="wrap">{`${LINKED} Claude Design · ${v.link.title}`}</Text>}
+      {v.link !== null && (
+        <Text color="suggestion" wrap="wrap">{`${LINKED} ${v.link.source === 'figma' ? 'Figma' : 'Claude Design'} · ${v.link.title}`}</Text>
+      )}
     </Box>
   )
 
@@ -353,8 +442,77 @@ export function panel(els: Elements, v: PanelView, act: Actions, surface: string
     </Box>
   )
 
+  // The option to improve a Figma file: one card with one Button. Its label follows the flow: the option, Loading, what
+  // is missing (Figma, then the link), Reading, and Connected once Claude has read the file. Connected links the project
+  // to the file. The link field is here too while the link is asked for.
+  const im = v.improve
+  const improveCard = (
+    <Box flexDirection="column" borderStyle="round" paddingX={1}>
+      <Text color="claude" bold>{IMPROVE_TITLE}</Text>
+      <Text dimColor wrap="wrap">{`${DETAIL} ${improveStatus(im)}`}</Text>
+      <Button
+        key="improve"
+        label={im.busy ? 'Loading…' : im.step === 'connected' ? `Connected · ${im.inventory?.fileName ?? 'Figma file'}` : IMPROVE_LABEL[im.step]}
+        {...primaryIf(im.step === 'connected' && !im.busy)}
+        onPress={im.step === 'connected' ? act.improveConnect : act.improveStart}
+      />
+      {im.step === 'link' && !im.busy && Input !== undefined && (
+        <Input
+          key="improve-link"
+          label="Figma file link"
+          placeholder={FIGMA_LINK_PLACEHOLDER}
+          submitLabel="Read the file"
+          onSubmit={act.improveLink}
+        />
+      )}
+    </Box>
+  )
+
+  // What Claude read from the Figma file, in sub-boxes, with the three things the person can do next.
+  const figmaFileCard =
+    im.step === 'connected' && im.file !== null && im.inventory !== null ? (
+      <Box flexDirection="column" borderStyle="round" paddingX={1}>
+        <Text color="claude" bold>Figma file</Text>
+        <Box flexDirection="column" borderStyle="single" paddingX={1}>
+          <Text wrap="wrap">{im.inventory.fileName}</Text>
+          <Text dimColor wrap="wrap">{im.file.url}</Text>
+          <Text dimColor wrap="wrap">{`read ${im.inventory.readAt.slice(0, 10)} · ${inventoryLine(im.inventory)}`}</Text>
+        </Box>
+        {im.inventory.fonts.length > 0 && (
+          <Box flexDirection="column" borderStyle="single" paddingX={1}>
+            <Text dimColor wrap="wrap">{`${DETAIL} Fonts: ${im.inventory.fonts.join(', ')}`}</Text>
+          </Box>
+        )}
+        {im.inventory.colours.length > 0 && (
+          <Box flexDirection="row" borderStyle="single" paddingX={1} gap={1}>
+            <Text dimColor>{`${DETAIL} Colours`}</Text>
+            {im.inventory.colours.map((colour, i) => {
+              const hex = HEX.exec(colour)
+              return hex === null ? (
+                <Text key={`colour-${i}`} dimColor>{colour}</Text>
+              ) : (
+                <Text key={`colour-${i}`} backgroundColor={hex[0]}>{'   '}</Text>
+              )
+            })}
+          </Box>
+        )}
+        {im.inventory.notes !== '' && (
+          <Box flexDirection="column" borderStyle="single" paddingX={1}>
+            <Text dimColor wrap="wrap">{`${DETAIL} ${im.inventory.notes}`}</Text>
+          </Box>
+        )}
+        <Box flexDirection="row" gap={2}>
+          <Button key="improve-with" label="Improve with Claude" variant="primary" onPress={act.improveWith} />
+          <Button key="improve-again" label="Read again" onPress={act.improveAsk} />
+          <Button key="improve-stop" label="Disconnect" plain onPress={act.improveStop} />
+        </Box>
+      </Box>
+    ) : null
+
   const figmaView = (
     <Box flexDirection="column" gap={1}>
+      {improveCard}
+      {figmaFileCard}
       <Box flexDirection="column" borderStyle="round" paddingX={1}>
         <Text color="claude" bold>Variable collections</Text>
         {v.collections.length === 0 && (
@@ -384,7 +542,9 @@ export function panel(els: Elements, v: PanelView, act: Actions, surface: string
       <Box flexDirection="row" gap={2}>
         {v.hasConfig && <Button key="approve" label="Approve this config" variant="primary" onPress={act.approve} />}
         {canWithdraw && <Button key="withdraw" label="Withdraw" onPress={act.withdraw} />}
-        {v.link !== null && <Button key="unlink" label="Unlink Claude Design" plain onPress={act.unlink} />}
+        {v.link !== null && (
+          <Button key="unlink" label={`Unlink ${v.link.source === 'figma' ? 'Figma' : 'Claude Design'}`} plain onPress={act.unlink} />
+        )}
         <Button key="refresh" label="Refresh" hotkey="r" onPress={act.refresh} />
       </Box>
       {v.hasConfig && <Text dimColor wrap="wrap">{`${DETAIL} Approve is a button on purpose: nothing signs off by accident.`}</Text>}
@@ -447,6 +607,8 @@ export function panel(els: Elements, v: PanelView, act: Actions, surface: string
         </Box>
       )}
       {v.setup.step === 'existing' && linkField}
+      {v.setup.step === 'existing' && improveCard}
+      {v.setup.step === 'existing' && figmaFileCard}
       {v.setup.step === 'new' && howItRuns}
     </Box>
   )

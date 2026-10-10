@@ -7,13 +7,23 @@ import {
   briefText,
   buildStages,
   EMPTY_VIEW,
+  figmaDisconnectRecord,
+  figmaFileFrom,
   figmaLines,
+  figmaRecord,
+  findFigmaUrl,
+  hasFigmaTools,
   hunksOnly,
+  improveRequest,
+  improveStatus,
+  improveStep,
   indicatorText,
+  inventoryFrom,
   lastLine,
   linkFrom,
   linkRecord,
   linkTarget,
+  readRequest,
   parseBrief,
   pickFor,
   playbackFrom,
@@ -23,7 +33,7 @@ import {
   turnNote,
   unlinkRecord,
 } from './brief'
-import { panel } from './panel'
+import { improveUpdater, panel } from './panel'
 
 // Everything that takes $ lives in this file: the engine only follows $ into functions declared here. The state
 // references are declared here too, so the engine can list what this module reads and writes.
@@ -43,6 +53,10 @@ const DESCRIPTION = 'design-system-definer: open the defsys panel to set up, rev
 const CONFIG = 'ds.config.yaml'
 const RECORD = 'ds-signoff.json'
 const LINK = 'ds-design-system.json'
+// The Figma file the person gave (written by this mod), and what Claude read from it (written by Claude).
+const FIGMA_FILE = 'ds-figma.json'
+const INVENTORY_FILE = 'ds-figma-inventory.json'
+const INVENTORY_TEMPLATE = 'resources/defsys/templates/inventory.js'
 const BRIEF_FILE = 'ds-out/decision-brief.md'
 const PLAN_FILE = 'ds-out/build-plan.md'
 // Bundled in this mod, under the plugin root. Not a skills folder, so the skill registers no command of its own.
@@ -107,6 +121,7 @@ const SUB_HELP = [
   '  figma      open the panel on the Figma steps',
   '  new        open the setup flow on creating a design system',
   '  existing   open the setup flow on linking a Claude Design design system',
+  '  improve    start "Improve a Figma design system file" (Figma connection, the file link, then Claude reads it)',
   '  refresh    re-read the project folder',
   '  approve    sign the config off (typed by you; Claude cannot approve)',
   '  withdraw   withdraw the sign-off',
@@ -114,7 +129,15 @@ const SUB_HELP = [
   '  help       list these sub-commands',
 ].join('\n')
 
-type Snapshot = { configText: string | null; recordText: string | null; linkText: string | null; hasBrief: boolean; hasPlan: boolean }
+type Snapshot = {
+  configText: string | null
+  recordText: string | null
+  linkText: string | null
+  figmaText: string | null
+  inventoryText: string | null
+  hasBrief: boolean
+  hasPlan: boolean
+}
 type Run = { exitCode: number; stdout: string; stderr: string }
 type HelperResult = {
   ok: boolean
@@ -181,10 +204,14 @@ async function snapshot($: EngineInterface): Promise<Snapshot> {
   const configText = (await $.fs.exists(CONFIG)) ? await $.fs.read(CONFIG) : null
   const recordText = (await $.fs.exists(RECORD)) ? await $.fs.read(RECORD) : null
   const linkText = (await $.fs.exists(LINK)) ? await $.fs.read(LINK) : null
+  const figmaText = (await $.fs.exists(FIGMA_FILE)) ? await $.fs.read(FIGMA_FILE) : null
+  const inventoryText = (await $.fs.exists(INVENTORY_FILE)) ? await $.fs.read(INVENTORY_FILE) : null
   return {
     configText,
     recordText,
     linkText,
+    figmaText,
+    inventoryText,
     hasBrief: await $.fs.exists(BRIEF_FILE),
     hasPlan: await $.fs.exists(PLAN_FILE),
   }
@@ -200,6 +227,12 @@ async function playback($: EngineInterface, folder: string, scripts: string): Pr
 async function buildView($: EngineInterface, snap: Snapshot, previous: PanelView): Promise<PanelView> {
   const folder = await $.session.cwd()
   const { signoff, approvedAt } = signoffFrom(snap.configText, snap.recordText)
+  // The Figma option: the two files say what was given and what was read. Whether Figma's tools are in the chat is asked
+  // only while the option is open and the file has not been read; otherwise the last answer stands.
+  const file = figmaFileFrom(snap.figmaText)
+  const inventory = inventoryFrom(snap.inventoryText, file)
+  const { active, busy } = previous.improve
+  const hasFigma = active && inventory === null ? await figmaConnected($) : previous.improve.hasFigma
   const head: PanelView = {
     ...EMPTY_VIEW,
     folder,
@@ -207,6 +240,7 @@ async function buildView($: EngineInterface, snap: Snapshot, previous: PanelView
     approvedAt,
     hasConfig: snap.configText !== null,
     link: linkFrom(snap.linkText),
+    improve: { active, busy, hasFigma, file, inventory, step: improveStep(active, hasFigma, file, inventory) },
     fingerprint: JSON.stringify(snap),
   }
   if (snap.configText === null) {
@@ -267,6 +301,13 @@ async function refresh($: EngineInterface, message = ''): Promise<void> {
     pick: prev.pick,
     edit: prev.edit,
     setup: prev.setup,
+    // The Figma option is opened and closed by the person while the folder is read, so those two come from now.
+    improve: {
+      ...view.improve,
+      active: prev.improve.active,
+      busy: prev.improve.busy,
+      step: improveStep(prev.improve.active, view.improve.hasFigma, view.improve.file, view.improve.inventory),
+    },
     interview: view.signoff === 'current' ? false : prev.interview,
     message,
   }))
@@ -369,7 +410,105 @@ async function linkSystem($: EngineInterface, text: string): Promise<string> {
 
 async function unlink($: EngineInterface): Promise<string> {
   await $.fs.write(LINK, unlinkRecord(new Date(await $.clock.now()).toISOString()))
-  return 'Unlinked from Claude Design.'
+  return 'Unlinked this project from its design system.'
+}
+
+// ---- "Improve a Figma design system file": the Figma connection, the file's link, Claude reading it, then connected ----
+
+// Whether Figma's tools are among the tools the chat can call. A failed list counts as not connected.
+async function figmaConnected($: EngineInterface): Promise<boolean> {
+  const tools = await $.tool.list().catch(() => [])
+  return hasFigmaTools(tools.filter(tool => tool.mcp).map(tool => tool.name))
+}
+
+// Opens the option, or checks it again. The folder is read and the connection asked for, and Loading shows meanwhile.
+async function improveStart($: EngineInterface): Promise<string> {
+  if ((await read($, viewAtom)).improve.busy) return 'Still loading.'
+  await update($, viewAtom, prev => ({ ...prev, improve: { ...prev.improve, active: true, busy: true } }))
+  try {
+    await refresh($, (await read($, viewAtom)).message)
+  } finally {
+    await update($, viewAtom, prev => ({ ...prev, improve: { ...prev.improve, busy: false } }))
+  }
+  return improveStatus((await read($, viewAtom)).improve)
+}
+
+// Asks Claude to read the file: the request is submitted as a prompt, and the skill's text joins the system prompt. A
+// prompt that cannot be submitted is put in the prompt box for the person to send.
+async function sendReadRequest($: EngineInterface, text: string): Promise<string> {
+  await update($, viewAtom, prev => ({ ...prev, interview: true }))
+  $.prompt.submit({ text }).catch(async () => {
+    await fillPrompt($, text).catch(() => false)
+  })
+  return 'Asked Claude to read the file in the chat.'
+}
+
+function readText($: EngineInterface, file: NonNullable<PanelView['improve']['file']>): string {
+  return readRequest(file, `${$.plugin.root}/${INVENTORY_TEMPLATE}`)
+}
+
+// Takes the Figma link the person gave, remembers it in the folder, and asks Claude to read the file.
+async function improveLink($: EngineInterface, text: string): Promise<string> {
+  const url = findFigmaUrl(text)
+  const record = url === null ? null : figmaRecord(url, new Date(await $.clock.now()).toISOString())
+  const file = figmaFileFrom(record)
+  if (record === null || file === null) return 'That is not a link to a Figma file. Paste one like https://www.figma.com/design/…'
+  await $.fs.write(FIGMA_FILE, record)
+  const sent = await sendReadRequest($, readText($, file))
+  await refresh($, `${sent} Reading ${file.title}.`)
+  return sent
+}
+
+// Asks again, for a file whose link is already in the folder.
+async function improveAsk($: EngineInterface): Promise<string> {
+  const file = (await read($, viewAtom)).improve.file
+  if (file === null) return 'There is no Figma file link yet.'
+  return sendReadRequest($, readText($, file))
+}
+
+// Stops the option. A file that was given is forgotten, and so is what was read from it.
+async function improveStop($: EngineInterface): Promise<string> {
+  const view = await read($, viewAtom)
+  if (view.improve.file !== null) {
+    const stoppedAt = figmaDisconnectRecord(new Date(await $.clock.now()).toISOString())
+    await $.fs.write(FIGMA_FILE, stoppedAt)
+    if (await $.fs.exists(INVENTORY_FILE)) await $.fs.write(INVENTORY_FILE, stoppedAt)
+  }
+  await update($, viewAtom, prev => ({ ...prev, improve: { ...prev.improve, active: false, busy: false } }))
+  return 'Stopped. The Figma file is not connected.'
+}
+
+// Connected, pressed: the project is linked to the Figma file that was read, and the panel opens on its details.
+async function improveConnect($: EngineInterface): Promise<string> {
+  const { file, inventory } = (await read($, viewAtom)).improve
+  if (file === null || inventory === null) return 'The file has not been read yet.'
+  await $.fs.write(LINK, linkRecord({ title: inventory.fileName, url: file.url }, new Date(await $.clock.now()).toISOString(), 'figma'))
+  await update($, viewAtom, prev => ({ ...prev, tab: 'figma' as const, setup: { ...prev.setup, step: 'choose' as const } }))
+  await openPane($)
+  return `Connected this project to ${inventory.fileName}.`
+}
+
+// The Figma option's actions, shared by the band above the chat and the pane. Each answers on the panel's message line.
+function improveActions($: EngineInterface) {
+  const say = (message: string) => update($, viewAtom, prev => ({ ...prev, message }))
+  return {
+    improveStart: async () => {
+      await improveStart($)
+    },
+    improveLink: async (text: string) => say(await improveLink($, text)),
+    improveAsk: async () => say(await improveAsk($)),
+    improveStop: async () => refresh($, await improveStop($)),
+    improveConnect: async () => refresh($, await improveConnect($)),
+    improveWith: async () => say(await improveWith($)),
+  }
+}
+
+// Improve with Claude: the request goes in the prompt box, so the person can add to it before sending.
+async function improveWith($: EngineInterface): Promise<string> {
+  const { file, inventory } = (await read($, viewAtom)).improve
+  if (file === null || inventory === null) return 'The file has not been read yet.'
+  const filled = await fillPrompt($, improveRequest(file, inventory)).catch(() => false)
+  return filled ? 'The request is in the prompt box. Press Enter in the chat to start.' : 'Type "improve the Figma design system" in the chat to start.'
 }
 
 // ---- the interview: while it is on, the skill's own text is in the system prompt for the session ----
@@ -473,6 +612,10 @@ async function tick($: EngineInterface): Promise<void> {
     const fingerprint = JSON.stringify(await snapshot($))
     const current = await read($, viewAtom)
     if (fingerprint !== current.fingerprint) await refresh($, current.message)
+    // The option waits for Figma to be connected. The folder does not change meanwhile, so the connection is asked for.
+    else if (current.improve.active && current.improve.step === 'connect' && (await figmaConnected($))) {
+      await refresh($, current.message)
+    }
   } finally {
     ticking = false
   }
@@ -507,6 +650,11 @@ async function runCommand($: EngineInterface, args: string): Promise<{ text?: st
     const text = await unlink($)
     await refresh($, text)
     return { text }
+  }
+  if (sub === 'improve') {
+    // The band above the chat shows the flow, so the answer is the state it is in. The panel is not needed for it.
+    const text = await improveStart($)
+    return { text: `defsys: ${text}` }
   }
   const tab = TAB_FOR_SUB.get(sub)
   const setup = SETUP_SUBS.has(sub) ? (sub as SetupStep) : null
@@ -621,9 +769,26 @@ export const register: Register = on => {
 
   // While the sign-off does not hold, each prompt carries a line that says so, so the model knows before it acts.
   on('prompt.submit', async ($, e, next) => {
-    const note = turnNote(await read($, viewAtom))
-    if (note === undefined) return next(e)
-    return next({ ...e, context: [...(e.context ?? []), note] })
+    const view = await read($, viewAtom)
+    // The Figma option is asking for the file's link: a Figma link typed in the chat box answers it, and the prompt becomes
+    // the request to read the file. A prompt this mod submitted itself (origin plugin) is left as it is.
+    let entry = e
+    const kind = e.origin?.kind
+    const typed = kind === undefined || kind === 'composer' || kind === 'bridge' || kind === 'sdk'
+    if (typed && view.improve.active && view.improve.step === 'link') {
+      const url = findFigmaUrl(e.text)
+      const record = url === null ? null : figmaRecord(url, new Date(await $.clock.now()).toISOString())
+      const file = figmaFileFrom(record)
+      if (url !== null && record !== null && file !== null) {
+        await $.fs.write(FIGMA_FILE, record)
+        await update($, viewAtom, prev => ({ ...prev, interview: true }))
+        const rest = e.text.replace(url, '').trim()
+        entry = { ...e, text: rest === '' ? readText($, file) : `${readText($, file)}\n\nThe person also wrote: ${rest}` }
+        refresh($, `Reading ${file.title}.`).catch(() => undefined)
+      }
+    }
+    const note = turnNote(view)
+    return next(note === undefined ? entry : { ...entry, context: [...(entry.context ?? []), note] })
   }).catch((_, e, next) => next(e))
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
@@ -649,18 +814,26 @@ export const register: Register = on => {
   // The indicator above the chat: the design system's name, its stages, the sign-off and the failing pairs, with an
   // Open button. Nothing is drawn when the folder has no design system, and the band keeps what other mods draw.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const text = indicatorText(await read($, viewAtom))
-    if (text === undefined || e.props.hasSurvey) return next(e)
+    const view = await read($, viewAtom)
+    const text = indicatorText(view)
+    const els = $.ui.resolve(e)
+    const updater = improveUpdater(els, view, improveActions($))
+    if ((text === undefined && updater === null) || e.props.hasSurvey) return next(e)
     const drawn = await next(e)
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const { Box, Button, Text } = els
     return (
-      <Box flexDirection="row" gap={1}>
-        <Text color="claude" bold>
-          ✻ defsys
-        </Text>
-        <Text>{text}</Text>
-        <Button key="open" label="Open" onPress={() => openPane($)} />
-        {drawn}
+      <Box flexDirection="column">
+        {updater}
+        <Box flexDirection="row" gap={1}>
+          {text !== undefined && (
+            <Text color="claude" bold>
+              ✻ defsys
+            </Text>
+          )}
+          {text !== undefined && <Text>{text}</Text>}
+          {text !== undefined && <Button key="open" label="Open" onPress={() => openPane($)} />}
+          {drawn}
+        </Box>
       </Box>
     )
   })
@@ -693,6 +866,7 @@ export const register: Register = on => {
       unlink: async () => refresh($, await unlink($)),
       startInterview: () => startInterview($),
       stopInterview: () => stopInterview($),
+      ...improveActions($),
     }
     return panel($.ui.resolve(e), await read($, viewAtom), actions, e.surface)
   })

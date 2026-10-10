@@ -45,9 +45,39 @@ export type SetupState = {
   selected: string
 }
 
-// The Claude Design design system this project is linked to: ds-design-system.json in the project folder. The title is
-// the name the person typed, or the last segment of the pasted link; url is the pasted link, or empty for a name only.
-export type DesignSystemLink = { title: string; url: string; linkedAt: string }
+// The design system this project is linked to: ds-design-system.json in the project folder. The title is the name the
+// person typed, or the last segment of the pasted link; url is the pasted link, or empty for a name only. The source is
+// Claude Design, or the Figma file the person connected.
+export type DesignSystemLink = { title: string; url: string; linkedAt: string; source: 'claude-design' | 'figma' }
+
+// "Improve a Figma design system file". The flow runs: off, then connect (Figma is not connected to the chat), link (the
+// file's link is asked for), reading (Claude fetches the file in the chat), connected (the file was read).
+export type ImproveStep = 'off' | 'connect' | 'link' | 'reading' | 'connected'
+
+// The Figma file the person gave: ds-figma.json in the project folder, written by this mod.
+export type FigmaFile = { url: string; fileKey: string; title: string; requestedAt: string }
+
+// What Claude read from the file: ds-figma-inventory.json in the project folder, written by Claude after it read the file.
+export type FigmaInventory = {
+  fileName: string
+  readAt: string
+  counts: Array<{ label: string; value: number }>
+  fonts: string[]
+  colours: string[]
+  notes: string
+}
+
+export type ImproveState = {
+  // The person pressed the option and has not cancelled. Not kept across sessions; the two files are.
+  active: boolean
+  // True while the option checks the Figma connection and reads the two files.
+  busy: boolean
+  step: ImproveStep
+  // Figma's tools are among the tools the chat can call.
+  hasFigma: boolean
+  file: FigmaFile | null
+  inventory: FigmaInventory | null
+}
 
 // A change the person previewed and may apply. yaml is the whole new file; base is the file it was made from.
 export type EditState = {
@@ -69,6 +99,7 @@ export type PanelView = {
   approvedAt: string | null
   hasConfig: boolean
   link: DesignSystemLink | null
+  improve: ImproveState
   setup: SetupState
   stages: StageRow[]
   answers: Answer[]

@@ -6,6 +6,10 @@ import type {
   DecisionRow,
   DesignSystemLink,
   EditState,
+  FigmaFile,
+  FigmaInventory,
+  ImproveState,
+  ImproveStep,
   PanelView,
   Playback,
   SetupState,
@@ -41,12 +45,15 @@ export const NEW_SETTINGS: Array<{ key: string; path: string[]; label: string; k
 
 export const EMPTY_SETUP: SetupState = { step: 'choose', systems: [], systemsStatus: 'idle', systemsNote: '', selected: '' }
 
+export const EMPTY_IMPROVE: ImproveState = { active: false, busy: false, step: 'off', hasFigma: false, file: null, inventory: null }
+
 export const EMPTY_VIEW: PanelView = {
   folder: '',
   signoff: 'none',
   approvedAt: null,
   hasConfig: false,
   link: null,
+  improve: EMPTY_IMPROVE,
   setup: EMPTY_SETUP,
   stages: STAGE_NAMES.map((name, i): StageRow => ({ no: i + 1, name, state: 'todo', summary: 'not yet' })),
   answers: [],
@@ -463,7 +470,7 @@ export function linkFrom(text: string | null): DesignSystemLink | null {
   try {
     const data: unknown = JSON.parse(text)
     if (!isRecord(data)) return null
-    const { title, url, linkedAt } = data
+    const { title, url, linkedAt, source } = data
     const name = typeof title === 'string' ? title.trim() : ''
     const address = typeof url === 'string' ? url.trim() : ''
     if (name === '' && address === '') return null
@@ -471,6 +478,7 @@ export function linkFrom(text: string | null): DesignSystemLink | null {
       title: name !== '' ? name : address,
       url: address,
       linkedAt: typeof linkedAt === 'string' ? linkedAt : '',
+      source: source === 'figma' ? 'figma' : 'claude-design',
     }
   } catch {
     return null
@@ -494,8 +502,174 @@ export function linkTarget(text: string): LinkTarget | null {
   return { title: segments[segments.length - 1] ?? LINK_FALLBACK_TITLE, url: value }
 }
 
-export function linkRecord(target: LinkTarget, linkedAt: string): string {
-  return JSON.stringify({ source: 'claude-design', title: target.title, url: target.url, linkedAt }, null, 2) + '\n'
+export function linkRecord(target: LinkTarget, linkedAt: string, source: 'claude-design' | 'figma' = 'claude-design'): string {
+  return JSON.stringify({ source, title: target.title, url: target.url, linkedAt }, null, 2) + '\n'
+}
+
+// ---- "Improve a Figma design system file": the file's link (ds-figma.json) and what Claude read from it ----
+
+// A Figma file link: the file's key sits after /design/, /file/, /board/, /slides/, /make/ or /proto/.
+const FIGMA_URL = /https?:\/\/(?:www\.)?figma\.com\/(?:design|file|board|slides|make|proto)\/([A-Za-z0-9]+)[^\s<>"')]*/i
+
+// The first Figma file link in a text, or null. A link to Figma's home page or to a team page has no key and is none.
+export function findFigmaUrl(text: string): string | null {
+  const found = FIGMA_URL.exec(text)
+  return found === null ? null : found[0]
+}
+
+export function figmaKeyOf(url: string): string | null {
+  const found = FIGMA_URL.exec(url)
+  return found === null ? null : (found[1] ?? null)
+}
+
+// The file's name as its link spells it: the segment after the key, with dashes as spaces. Empty when the link has none.
+function figmaTitleOf(url: string): string {
+  const path = url.replace(/[?#].*$/, '').split('/').filter(part => part !== '')
+  const at = path.findIndex(part => /^(design|file|board|slides|make|proto)$/i.test(part))
+  const name = at >= 0 ? (path[at + 2] ?? '') : ''
+  try {
+    return decodeURIComponent(name).replace(/[-_+]+/g, ' ').trim()
+  } catch {
+    return name.replace(/[-_+]+/g, ' ').trim()
+  }
+}
+
+export function figmaRecord(url: string, requestedAt: string): string | null {
+  const fileKey = figmaKeyOf(url)
+  if (fileKey === null) return null
+  return JSON.stringify({ url, fileKey, title: figmaTitleOf(url) || 'Figma file', requestedAt }, null, 2) + '\n'
+}
+
+export function figmaDisconnectRecord(disconnectedAt: string): string {
+  return JSON.stringify({ disconnectedAt }, null, 2) + '\n'
+}
+
+export function figmaFileFrom(text: string | null): FigmaFile | null {
+  if (text === null) return null
+  try {
+    const data: unknown = JSON.parse(text)
+    if (!isRecord(data)) return null
+    const { url, title, requestedAt } = data
+    if (typeof url !== 'string') return null
+    const fileKey = figmaKeyOf(url)
+    if (fileKey === null) return null
+    return {
+      url,
+      fileKey,
+      title: typeof title === 'string' && title.trim() !== '' ? title.trim() : 'Figma file',
+      requestedAt: typeof requestedAt === 'string' ? requestedAt : '',
+    }
+  } catch {
+    return null
+  }
+}
+
+const COUNT_LABELS: Array<[string, string]> = [
+  ['pages', 'pages'],
+  ['collections', 'collections'],
+  ['variables', 'variables'],
+  ['styles', 'styles'],
+  ['components', 'components'],
+]
+
+const stringsOf = (value: unknown, limit: number): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string').slice(0, limit) : []
+
+// What Claude wrote after it read the file. Claude writes this file, so it is read with care: it counts only when it has
+// a readAt, and only for the file that was asked for (a different key means an older file's inventory). Counts, fonts
+// and colours are taken when they have the right type, and left out otherwise.
+export function inventoryFrom(text: string | null, file: FigmaFile | null): FigmaInventory | null {
+  if (text === null || file === null) return null
+  try {
+    const data: unknown = JSON.parse(text)
+    if (!isRecord(data)) return null
+    const { url, readAt, fileName, summary, notes } = data
+    if (typeof readAt !== 'string' || readAt.trim() === '') return null
+    if (typeof url === 'string' && figmaKeyOf(url) !== file.fileKey) return null
+    const sums = isRecord(summary) ? summary : {}
+    const counts: Array<{ label: string; value: number }> = []
+    for (const [key, label] of COUNT_LABELS) {
+      const value = sums[key]
+      if (typeof value === 'number' && Number.isFinite(value) && value >= 0) counts.push({ label, value: Math.round(value) })
+    }
+    return {
+      fileName: typeof fileName === 'string' && fileName.trim() !== '' ? fileName.trim() : file.title,
+      readAt,
+      counts,
+      fonts: stringsOf(sums.fonts, 8),
+      colours: stringsOf(sums.colours, 12),
+      notes: typeof notes === 'string' ? notes.trim() : '',
+    }
+  } catch {
+    return null
+  }
+}
+
+// Where the flow stands. The inventory wins: once the file was read it is connected. Without it, the flow runs only while
+// the person has it open, and asks for what is missing in order: the Figma connection, then the file's link.
+export function improveStep(active: boolean, hasFigma: boolean, file: FigmaFile | null, inventory: FigmaInventory | null): ImproveStep {
+  if (file !== null && inventory !== null) return 'connected'
+  if (!active) return 'off'
+  if (!hasFigma) return 'connect'
+  if (file === null) return 'link'
+  return 'reading'
+}
+
+// The tools of Figma's connector, whatever the server is called: they end in one of these names.
+const FIGMA_TOOL = /__(use_figma|get_metadata|get_design_context|get_variable_defs)$/
+
+export function hasFigmaTools(names: readonly string[]): boolean {
+  return names.some(name => FIGMA_TOOL.test(name))
+}
+
+// The count line of a read file: "3 collections · 120 variables · 14 styles".
+export function inventoryLine(inventory: FigmaInventory): string {
+  const parts = inventory.counts.map(count => `${count.value} ${count.label}`)
+  return parts.length > 0 ? parts.join(' · ') : 'read, with no counts'
+}
+
+// One line on where the option stands, for the panel's card and for the /defsys improve answer.
+export function improveStatus(im: ImproveState): string {
+  if (im.busy) return 'Checking the Figma connection…'
+  switch (im.step) {
+    case 'connect':
+      return 'Figma is not connected to this chat. Connect it in Settings, under Connectors (or run /mcp in a terminal). This updates by itself once Figma is connected.'
+    case 'link':
+      return 'Figma is connected. Paste the link of the file to improve, here or in the band above the chat.'
+    case 'reading':
+      return `Claude is reading ${im.file?.title ?? 'the file'} in the chat. The details appear here when it has written ds-figma-inventory.json.`
+    case 'connected':
+      return `Connected to ${im.inventory?.fileName ?? 'the Figma file'}${im.inventory ? `: ${inventoryLine(im.inventory)}` : ''}.`
+    default:
+      return 'Read a Figma file and see how its design system can be improved. Claude fetches the details in the chat, and nothing in the file is changed.'
+  }
+}
+
+// The request the model reads when the link is given. It names the files the model writes, and says what not to touch.
+export function readRequest(file: FigmaFile, templatePath: string): string {
+  return [
+    `Read this Figma file for the defsys design system, read-only: ${file.url}`,
+    '',
+    'Use the Figma tools (use_figma, get_metadata). List its pages, its variable collections, its styles and its components.',
+    `Then run the inventory template ${templatePath} through use_figma on the page that holds the screens, for the fonts and colours the file really uses.`,
+    'Do not change anything in the Figma file.',
+    '',
+    'When you have read it, write ds-figma-inventory.json in the project folder as JSON:',
+    `{ "url": "${file.url}", "readAt": "<the time now, ISO 8601>", "fileName": "<the file's name>",`,
+    '  "summary": { "pages": n, "collections": n, "variables": n, "styles": n, "components": n,',
+    '    "fonts": ["family", ...], "colours": ["#rrggbb", ...] }, "notes": "<two sentences on what the file has and lacks>" }',
+    'Then say, in a short list, what you would improve in this design system. Do not edit ds.config.yaml yet.',
+  ].join('\n')
+}
+
+// The request "Improve with Claude" puts in the prompt box once the file was read.
+export function improveRequest(file: FigmaFile, inventory: FigmaInventory): string {
+  return [
+    `Improve the design system in this Figma file: ${file.url}`,
+    `It was read already (${inventoryLine(inventory)}; details in ds-figma-inventory.json).`,
+    'Compare it with ds.config.yaml if there is one. Propose the changes in order of value, one at a time, with the reason for each.',
+    'Change nothing in Figma or in the config until I say yes to a change.',
+  ].join('\n')
 }
 
 export function unlinkRecord(unlinkedAt: string): string {

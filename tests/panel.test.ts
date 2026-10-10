@@ -147,7 +147,12 @@ describe('the token tree', () => {
 
 describe('the Claude Design link', () => {
   test('a link file names its design system, and an unlink reads as no link', () => {
-    expect(linkFrom(LINKED)).toEqual({ title: 'Acme Brand', url: 'https://claude.ai/artifact/abc123', linkedAt: '2026-10-09T00:00:00.000Z' })
+    expect(linkFrom(LINKED)).toEqual({
+      title: 'Acme Brand',
+      url: 'https://claude.ai/artifact/abc123',
+      linkedAt: '2026-10-09T00:00:00.000Z',
+      source: 'claude-design',
+    })
     expect(linkFrom(unlinkRecord('2026-10-09T00:00:00.000Z'))).toBeNull()
     expect(linkFrom(null)).toBeNull()
     expect(linkFrom('not json')).toBeNull()
@@ -156,7 +161,10 @@ describe('the Claude Design link', () => {
   test('a name typed without a link is a title with an empty url, and reads back as that link', () => {
     expect(linkTarget('  Acme Brand  ')).toEqual({ title: 'Acme Brand', url: '' })
     const written = linkRecord({ title: 'Acme Brand', url: '' }, '2026-10-09T00:00:00.000Z')
-    expect(linkFrom(written)).toEqual({ title: 'Acme Brand', url: '', linkedAt: '2026-10-09T00:00:00.000Z' })
+    expect(linkFrom(written)).toEqual({ title: 'Acme Brand', url: '', linkedAt: '2026-10-09T00:00:00.000Z', source: 'claude-design' })
+    // A link made from a Figma file says so.
+    const fromFigma = linkRecord({ title: 'Acme Design System', url: 'https://www.figma.com/design/AbC123xyz/X' }, '2026-10-10T00:00:00.000Z', 'figma')
+    expect(linkFrom(fromFigma)?.source).toBe('figma')
   })
 
   test('a pasted https link is the url, titled by its last path segment, and a blank text is no link', () => {
@@ -174,7 +182,7 @@ describe('what the rest of Claude Code reads', () => {
 
   test('the indicator stays off with no design system, and names the design system and its failing pairs when there is one', () => {
     expect(indicatorText(EMPTY_VIEW)).toBeUndefined()
-    expect(indicatorText({ ...base, link: { title: 'Acme Brand', url: 'x', linkedAt: '' } })).toBe(
+    expect(indicatorText({ ...base, link: { title: 'Acme Brand', url: 'x', linkedAt: '', source: 'claude-design' } })).toBe(
       'Acme Brand · 0/9 stages · not signed off · 0 failing pairs',
     )
     expect(indicatorText({ ...base, failing: ['FAIL text/muted'] })).toMatch(/· 1 failing pair$/)
@@ -529,7 +537,7 @@ describe('the /defsys command', () => {
     expect(withdrawn.text).toMatch(/Sign-off withdrawn/)
     expect(disk.get('ds-signoff.json')).toContain('withdrawnAt')
     const unlinked = await $.command.run({ command: 'defsys', args: 'unlink', origin, presentation })
-    expect(unlinked.text).toMatch(/Unlinked from Claude Design/)
+    expect(unlinked.text).toMatch(/Unlinked this project/)
     expect(disk.get(LINK)).toContain('unlinkedAt')
   })
 

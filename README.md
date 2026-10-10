@@ -55,6 +55,7 @@ Two names reach the same handler. `/defsystem:defsys` comes from `commands/defsy
 | `/defsys figma` | Opens it on the Figma steps |
 | `/defsys new` | Opens the setup flow on creating a design system |
 | `/defsys existing` | Opens the setup flow on linking a Claude Design design system |
+| `/defsys improve` | Starts "Improve a Figma design system file" and says where it stands |
 | `/defsys refresh` | Re-reads the project folder |
 | `/defsys approve` | Signs the config off (typed by you; Claude cannot approve) |
 | `/defsys withdraw` | Withdraws the sign-off |
@@ -66,6 +67,18 @@ The panel opens as soon as the command is entered. The folder is read in the bac
 ## The indicator above the chat
 
 With a design system in the folder, a band above the chat shows `✻ defsys`, the design system's name, its stage count, the sign-off, the failing pairs, and an **Open** button. With no design system, nothing is drawn. The band keeps the drawing of other mods.
+
+## Improve a Figma design system file
+
+In the setup flow, under **Use an existing design system**, and on the Figma tab, the **Improve a Figma design system file** button starts a flow that reads a Figma file through the Figma connector:
+
+1. **Loading.** The button checks whether Figma's tools are among the tools the chat can call.
+2. **Connect Figma.** If they are not, a card above the chat says so, with **Check again** and **Cancel**. It rechecks by itself every few seconds. Connecting is done in Settings, under Connectors (or `/mcp` in a terminal); the mod cannot connect Figma for you.
+3. **The link.** Once Figma is connected, the card above the chat asks for the file's link, in a field. A Figma link typed in the chat box answers it too.
+4. **Reading.** The link goes to `ds-figma.json`, and the mod submits a request that tells Claude to read the file, read-only: its pages, collections, styles and components, and the fonts and colours the skill's `inventory.js` finds. Claude writes what it found to `ds-figma-inventory.json`. Nothing in the Figma file is changed.
+5. **Connected.** When that file exists for the same Figma file, the card above the chat shows the counts and a **Connected** button. Pressing it links the project to the Figma file and opens the Figma tab, which shows the file's counts, fonts, colours and notes, with **Improve with Claude** (puts the request in the prompt box), **Read again** and **Disconnect**.
+
+`ds-figma-inventory.json` is written by Claude, so the mod reads it with care: it counts only with a `readAt`, and only for the file that was asked for. **Disconnect** forgets both files.
 
 ## The interview
 
