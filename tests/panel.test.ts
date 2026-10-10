@@ -476,6 +476,20 @@ describe('the /defsys command', () => {
     expect(asked).toContain('command.describe')
   })
 
+  test('the bare name is hidden from the typeahead, so /defsystem:defsys is the one entry', async ($, on) => {
+    machine(on, { 'ds.config.yaml': CONFIG_YAML }, world(BRIEF_STDOUT, INSPECT_JSON))
+    const described = await $.command.describe({
+      command: 'defsys',
+      description: '',
+      argumentHint: '',
+      isHidden: false,
+      immediate: true,
+      provider: { plugin: 'defsystem', tier: 'user' },
+    })
+    expect(described.isHidden).toBe(true)
+    expect(described.description).toMatch(/defsys panel/)
+  })
+
   test('the typed name, the file command and the skill name all open the pane at once, placed at any width', async ($, on) => {
     machine(on, { 'ds.config.yaml': CONFIG_YAML }, world(BRIEF_STDOUT, INSPECT_JSON))
     on('ui.open', () => ({ value: { isPlaced: true } }))
