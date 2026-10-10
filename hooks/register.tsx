@@ -732,8 +732,9 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // The typeahead line for /defsys: its name and the skill it belongs to, and no argument hint.
-  on('command.describe', { command: COMMAND }, () => ({ description: DESCRIPTION, isHidden: false }))
+  // The bare /defsys is hidden from the typeahead: /defsystem:defsys (the command file) is listed from load and stands for
+  // it, so the list shows one entry. A typed /defsys still runs.
+  on('command.describe', { command: COMMAND }, () => ({ description: DESCRIPTION, isHidden: true }))
 
   // /defsys, and the canonical name in case the engine resolves a typed /defsys to it. Both run the same handler.
   on('command.run', { command: COMMAND }, ($, e) => runCommand($, e.args)).catch(($, e, next) =>
