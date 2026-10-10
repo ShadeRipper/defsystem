@@ -35,6 +35,9 @@ const PANE = 'defsystem'
 const COMMAND = 'defsys'
 // The name the skill answers to. If the engine resolves a typed /defsys to it, the same handler answers it.
 const CANONICAL = 'design-system-definer:defsys'
+// The name of this plugin's own commands/defsys.md. The engine lists a file command at load, before any prompt, so the
+// typeahead shows /defsys from the first slash. A command registered in session.start is listed only after it.
+const FILE_COMMAND = 'defsystem:defsys'
 // The typeahead line: the name and the skill it belongs to. The command has no argument hint.
 const DESCRIPTION = 'design-system-definer: open the defsys panel to set up, review and sign off a design system'
 const CONFIG = 'ds.config.yaml'
@@ -564,8 +567,9 @@ export const register: Register = on => {
         isDeferred: false,
       })
       .catch(() => undefined)
-    // The command goes last. A name the engine refuses throws, so it is registered inside a try: the reason goes to
-    // the transcript once per session, and the canonical name below still answers a typed /defsys.
+    // The command goes last. commands/defsys.md lists /defsystem:defsys from load; the bare /defsys exists only once it is
+    // registered here. A name the engine refuses throws, so it is registered inside a try: the reason goes to the
+    // transcript once per session, and the file command still answers.
     try {
       await $.command.register({ name: COMMAND, description: DESCRIPTION, immediate: true })
       // The typeahead keeps the command list it read for the session until its descriptions are invalidated. A chat
@@ -588,6 +592,9 @@ export const register: Register = on => {
     next.called ? next(e) : { text: PANE_FAILED },
   )
   on('command.run', { command: CANONICAL }, ($, e) => runCommand($, e.args)).catch(($, e, next) =>
+    next.called ? next(e) : { text: PANE_FAILED },
+  )
+  on('command.run', { command: FILE_COMMAND }, ($, e) => runCommand($, e.args)).catch(($, e, next) =>
     next.called ? next(e) : { text: PANE_FAILED },
   )
 

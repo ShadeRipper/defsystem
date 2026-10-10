@@ -468,12 +468,14 @@ describe('the /defsys command', () => {
     expect(asked).toContain('command.describe')
   })
 
-  test('the typed name and the canonical name both open the pane at once, placed at any width', async ($, on) => {
+  test('the typed name, the file command and the skill name all open the pane at once, placed at any width', async ($, on) => {
     machine(on, { 'ds.config.yaml': CONFIG_YAML }, world(BRIEF_STDOUT, INSPECT_JSON))
     on('ui.open', () => ({ value: { isPlaced: true } }))
     const typed = await $.command.run({ command: 'defsys', args: '', origin, presentation })
+    const file = await $.command.run({ command: 'defsystem:defsys', args: '', origin, presentation })
     const canonical = await $.command.run({ command: 'design-system-definer:defsys', args: '', origin, presentation })
     expect(typed.text).toBeUndefined()
+    expect(file.text).toBeUndefined()
     expect(canonical.text).toBeUndefined()
   })
 

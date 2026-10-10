@@ -42,7 +42,9 @@ Chats load the copy that the install record points to, not the folder. `/reload-
 
 ## Commands
 
-The command is `/defsys`. Its typeahead line names the skill and shows no argument hint. Sub-commands follow it as words, and `/defsys help` lists them:
+The command is `/defsys`. Its typeahead line names the skill and shows no argument hint. Sub-commands follow it as words, and `/defsys help` lists them.
+
+Two names reach the same handler. `/defsystem:defsys` comes from `commands/defsys.md`, which the engine lists when the plugin loads, so it is in the typeahead from the first `/` of a new chat. The bare `/defsys` is registered when the session starts, and a chat resolves it only from its first prompt on. Type `/defs` in a new chat and pick `defsystem:defsys` from the list; from the second prompt on, `/defsys` works as typed.
 
 | Command | What it does |
 | --- | --- |
