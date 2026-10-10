@@ -3,6 +3,25 @@
 All notable changes to defsystem. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 versions are those of `.claude-plugin/plugin.json`.
 
+## 0.8.0
+
+### Changed
+- **The panel is redrawn in Claude Code's own design language.** Quiet, with one accent.
+  - Cards have a round border in the prompt-box colour, a bold title and dim secondary text. The accent colour is only the
+    ✻ mark and the stage in progress; card titles are no longer orange.
+  - Nothing is boxed inside a box. The stages, decisions, collections and Figma lines are rows; a token group is
+    indented under its parent instead of nested in its own border.
+  - The header is not a card. It shows the mark, the name, the folder (its end is kept when it is long), the sign-off
+    state, and one dot per stage (green done, accent in progress, open not begun) in place of the grey block bar.
+  - The tabs sit in a row with no card around them.
+  - Answers are plain rows, and the one picked is the primary button. The change preview takes the pending-decision
+    border colour that Claude Code uses for a request waiting for a yes.
+  - The sign-off card's border shows its state: green while it holds, amber when it lapsed.
+  - The interview is one row, not a card.
+  - The updater above the chat borders in the accent while it asks for something, in the prompt colour while Claude
+    reads, and in green once the file is connected.
+- Switching tabs clears the last message line, so an old message no longer stays in the header.
+
 ## 0.7.2
 
 ### Fixed
