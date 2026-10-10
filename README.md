@@ -42,11 +42,11 @@ Chats load the copy that the install record points to, not the folder. `/reload-
 
 ## Commands
 
-The command is `/defsys`. Its typeahead line names the skill and shows no argument hint. Sub-commands follow it as words, and `/defsys help` lists them.
+The command is `/defsystem:defsys`; type `/defs` and pick it from the typeahead. Its typeahead line names the skill and shows no argument hint. Sub-commands follow it as words (the examples below write the short name, `/defsys`), and `/defsys help` lists them.
 
 Version history is in [CHANGELOG.md](CHANGELOG.md).
 
-Two names reach the same handler. `/defsystem:defsys` comes from `commands/defsys.md`, which the engine lists when the plugin loads, so it is in the typeahead from the first `/` of a new chat. The bare `/defsys` is registered when the session starts, and a chat resolves it only from its first prompt on. The list shows only `defsystem:defsys`: the bare `/defsys` is hidden from it, but it still runs when typed, from the second prompt on. Type `/defs` in a new chat and pick `defsystem:defsys`.
+There is one command, and it comes from `commands/defsys.md`. The engine lists a command file when the plugin loads, so the command is in the typeahead from the first `/` of a new chat. The mod registers no command of its own: a command registered when the session starts is listed only after the chat's first prompt, and it showed up as a second entry in the typeahead.
 
 | Command | What it does |
 | --- | --- |
@@ -124,7 +124,7 @@ While the sign-off does not hold, each prompt carries a line that says so, so th
 - Approve writes the sign-off record in the project folder. Claude cannot write that record; only the Approve button or `/defsys approve`, typed by you, can.
 - A shell command that names the sign-off record is refused, even when it only writes documentation. Use the Write tool for documentation that mentions the record.
 - Linking to Claude Design attaches the design system to the project. It does not copy its tokens into `ds.config.yaml`; the skill's interview still builds the config.
-- If `/defsys` is refused as a name by the engine, the mod still answers the typed name through the canonical `design-system-definer:defsys`. The reason for a refused registration is written once per session to the transcript as `defsys: could not register /defsys: <reason>`.
+- A bare `/defsys` typed in full is not a command of this mod. Pick `defsystem:defsys` from the typeahead. The handler also answers the name `design-system-definer:defsys`, in case the engine resolves a typed `/defsys` to the separate plugin's command.
 - With the separate plugin enabled, its own `/design-system-definer:defsys` would also be answered by this panel. That is one more reason to keep the separate plugin disabled.
 
 ## License

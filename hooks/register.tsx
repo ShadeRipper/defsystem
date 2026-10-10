@@ -38,18 +38,14 @@ import { improveUpdater, panel } from './panel'
 // Everything that takes $ lives in this file: the engine only follows $ into functions declared here. The state
 // references are declared here too, so the engine can list what this module reads and writes.
 const viewAtom = atom({ plugin: 'defsystem', key: 'view' } as const, EMPTY_VIEW)
-// Whether the "could not register /defsys" line was written this session. The session's state keeps it across reloads.
-const notedAtom = atom({ plugin: 'defsystem', key: 'noted' } as const, false)
 
 const PANE = 'defsystem'
 const COMMAND = 'defsys'
 // The name the skill answers to. If the engine resolves a typed /defsys to it, the same handler answers it.
 const CANONICAL = 'design-system-definer:defsys'
-// The name of this plugin's own commands/defsys.md. The engine lists a file command at load, before any prompt, so the
-// typeahead shows /defsys from the first slash. A command registered in session.start is listed only after it.
+// The name of this plugin's own commands/defsys.md, the one command. The engine lists a file command at load, before any
+// prompt, so the typeahead shows it from the first slash. Its typeahead line is the file's description.
 const FILE_COMMAND = 'defsystem:defsys'
-// The typeahead line: the name and the skill it belongs to. The command has no argument hint.
-const DESCRIPTION = 'design-system-definer: open the defsys panel to set up, review and sign off a design system'
 const CONFIG = 'ds.config.yaml'
 const RECORD = 'ds-signoff.json'
 const LINK = 'ds-design-system.json'
@@ -103,7 +99,7 @@ const MODEL_NOTE = {
   scope: 'session' as const,
   text:
     'This project may use the defsys design-system skill (design-system-definer). ds.config.yaml holds the answers and ds-out/ ' +
-    'the build. The person opens the defsys panel with /defsys or the Open button in the indicator above the chat. Claude ' +
+    'the build. The person opens the defsys panel with /defsystem:defsys (typing /defsys finds it) or the Open button in the indicator above the chat. Claude ' +
     'cannot open the panel, so do not suggest any other command for it. Claude reads the state with the three ' +
     'mcp__defsystem__ tools, mcp__defsystem__status, mcp__defsystem__brief and mcp__defsystem__preview, ' +
     'and none of them writes a file. Claude cannot sign off: ds-signoff.json is written only by the Approve button in the panel, ' +
@@ -152,12 +148,6 @@ type HelperResult = {
 let ticking = false
 // The skill's SKILL.md, read once per load of this module.
 let skillText: string | null | undefined
-
-// The reason the engine gave for a refusal, whatever shape the thrown value has.
-function reasonOf(error: unknown): string {
-  if (typeof error === 'object' && error !== null && 'message' in error) return String((error as { message: unknown }).message)
-  return String(error)
-}
 
 // The skill's scripts folder, bundled in this mod. Checked on each use, so a folder restored while the mod runs is found.
 async function findScripts($: EngineInterface): Promise<string | null> {
@@ -715,28 +705,13 @@ export const register: Register = on => {
         isDeferred: false,
       })
       .catch(() => undefined)
-    // The command goes last. commands/defsys.md lists /defsystem:defsys from load; the bare /defsys exists only once it is
-    // registered here. A name the engine refuses throws, so it is registered inside a try: the reason goes to the
-    // transcript once per session, and the file command still answers.
-    try {
-      await $.command.register({ name: COMMAND, description: DESCRIPTION, immediate: true })
-      // The typeahead keeps the command list it read for the session until its descriptions are invalidated. A chat
-      // whose list was read before this name existed would not show /defsys, so ask for the list to be read again.
-      $.ui.invalidate('command.describe')
-    } catch (error) {
-      if (!(await read($, notedAtom))) {
-        await update($, notedAtom, () => true)
-        $.ui.log(`defsys: could not register /${COMMAND}: ${reasonOf(error)}`)
-      }
-    }
+    // No command is registered here. commands/defsys.md is the one command, /defsystem:defsys, listed from load. A second
+    // name registered here showed as a second entry in the typeahead, and the app's list does not honour a hidden flag.
     return next(e)
   })
 
-  // The bare /defsys is hidden from the typeahead: /defsystem:defsys (the command file) is listed from load and stands for
-  // it, so the list shows one entry. A typed /defsys still runs.
-  on('command.describe', { command: COMMAND }, () => ({ description: DESCRIPTION, isHidden: true }))
-
-  // /defsys, and the canonical name in case the engine resolves a typed /defsys to it. Both run the same handler.
+  // /defsystem:defsys is the command file's name. The other two names are answered too, in case the engine resolves a typed
+  // /defsys to one of them (the skill's own name, or a bare name registered by another plugin). All run the same handler.
   on('command.run', { command: COMMAND }, ($, e) => runCommand($, e.args)).catch(($, e, next) =>
     next.called ? next(e) : { text: PANE_FAILED },
   )

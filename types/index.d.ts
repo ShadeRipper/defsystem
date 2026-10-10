@@ -127,8 +127,6 @@ declare module 'claude-code' {
   interface PluginState {
     'defsystem': {
       view: PanelView
-      // Whether the "could not register /defsys" line was written this session.
-      noted: boolean
     }
   }
 }
