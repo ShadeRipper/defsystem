@@ -3,11 +3,22 @@
 All notable changes to defsystem. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 versions are those of `.claude-plugin/plugin.json`.
 
+## 0.7.2
+
+### Fixed
+- The typeahead shows one `defsys` entry. 0.7.1 hid the bare `/defsys` with a hidden flag, but the app's command list does
+  not honour it, so both entries stayed. The mod now registers no command of its own, and `/defsystem:defsys` (from
+  `commands/defsys.md`) is the only one.
+
+### Changed
+- A bare `/defsys` typed in full is no longer a command of this mod. Type `/defs` and pick `defsystem:defsys`.
+- Removed the "could not register /defsys" message and the state it needed.
+
 ## 0.7.1
 
 ### Changed
-- The bare `/defsys` is hidden from the typeahead. `/defsystem:defsys` is listed from load and stands for it, so a chat's
-  list shows one entry instead of two. A typed `/defsys` still runs the same handler.
+- The bare `/defsys` was marked hidden in the typeahead, so a chat's list would show one entry instead of two. The app
+  did not honour the flag; 0.7.2 removes the bare command.
 
 ## 0.7.0
 

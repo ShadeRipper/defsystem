@@ -456,7 +456,7 @@ describe('the /defsys command', () => {
     expect(unknown.text).toMatch(/Unknown sub-command "fly"/)
   })
 
-  test('the name is registered when the session starts, and the typeahead is asked to list it again', async ($, on) => {
+  test('no command is registered when the session starts: /defsystem:defsys, the command file, is the one entry', async ($, on) => {
     machine(on, { 'ds.config.yaml': CONFIG_YAML }, world(BRIEF_STDOUT, INSPECT_JSON))
     // The plugin's session.start starts a clock, so the test gives it one; the engine's own answer to session.start is below.
     mock.clock(on, { now: Date.UTC(2026, 9, 9) })
@@ -466,28 +466,8 @@ describe('the /defsys command', () => {
       registered.push(e.name)
       return { value: { command: e.name } }
     })
-    const asked: string[] = []
-    on('ui.invalidate', (_, e) => {
-      asked.push(e.event)
-      return { value: undefined }
-    })
     await $.session.start({ cwd: '/project', surface: 'terminal', isInteractive: true })
-    expect(registered).toContain('defsys')
-    expect(asked).toContain('command.describe')
-  })
-
-  test('the bare name is hidden from the typeahead, so /defsystem:defsys is the one entry', async ($, on) => {
-    machine(on, { 'ds.config.yaml': CONFIG_YAML }, world(BRIEF_STDOUT, INSPECT_JSON))
-    const described = await $.command.describe({
-      command: 'defsys',
-      description: '',
-      argumentHint: '',
-      isHidden: false,
-      immediate: true,
-      provider: { plugin: 'defsystem', tier: 'user' },
-    })
-    expect(described.isHidden).toBe(true)
-    expect(described.description).toMatch(/defsys panel/)
+    expect(registered).toEqual([])
   })
 
   test('the typed name, the file command and the skill name all open the pane at once, placed at any width', async ($, on) => {
@@ -673,7 +653,7 @@ describe('the model tools', () => {
     expect(note?.text).toMatch(/mcp__defsystem__brief/)
     expect(note?.text).toMatch(/mcp__defsystem__preview/)
     // How the person opens the panel, and that Claude cannot open it or sign off.
-    expect(note?.text).toMatch(/\/defsys or the Open button in the indicator above the chat/)
+    expect(note?.text).toMatch(/\/defsystem:defsys \(typing \/defsys finds it\) or the Open button in the indicator above the chat/)
     expect(note?.text).toMatch(/cannot open the panel/)
     expect(note?.text).toMatch(/cannot sign off/)
     expect(note?.text).toMatch(/ds-signoff\.json is written only by the Approve button/)
