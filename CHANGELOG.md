@@ -3,6 +3,18 @@
 All notable changes to defsystem. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 versions are those of `.claude-plugin/plugin.json`.
 
+## Unreleased
+
+### Security
+- A collection name containing a line break (CR, LF, U+2028 or U+2029) can no longer end the `//` comment at the top of a generated Figma build script and run as code. The name is collapsed to one line in that comment only; the script data and file names are unchanged.
+- `build.py` refuses to write a file whose path leaves the `--out` folder (for example a custom dimension, mode or brand name containing `../`). Every path is checked before the first file is written, and the build exits with code 2.
+- `build.py` no longer accepts shortened options such as `--appr`, so the shell guard's match on `--approve` cannot be sidestepped that way.
+- `sd.config.mjs` generation stops after 256 combinations instead of building every combination of modes first, so a config with many multi-mode collections no longer hangs or runs out of memory.
+
+### Changed
+- The README now states the limits of the sign-off gate instead of saying nothing the model does can write the record.
+- Added Python tests for the bundled scripts (`tests/test_scripts.py`).
+
 ## 0.8.0
 
 ### Changed

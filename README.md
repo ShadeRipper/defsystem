@@ -107,7 +107,7 @@ The model does not get the sign-off. It gets three read-only tools, and a short 
 | `mcp__defsystem__brief` | The decision brief: structure, decisions, checks, brands |
 | `mcp__defsystem__preview` | One change to an answer, with its diff and whether the contrast checks still pass. It writes nothing. |
 
-While the sign-off does not hold, each prompt carries a line that says so, so the model knows before it runs a build. The shell guard still refuses `build.py --approve` until the sign-off holds, and nothing the model does can write `ds-signoff.json`.
+While the sign-off does not hold, each prompt carries a line that says so, so the model knows before it runs a build. The shell guard still refuses `build.py --approve` until the sign-off holds, and the model's own Write and Edit tools cannot write `ds-signoff.json`. See [Limits of the sign-off gate](#limits-of-the-sign-off-gate).
 
 ## The panel
 
@@ -121,11 +121,21 @@ While the sign-off does not hold, each prompt carries a line that says so, so th
 
 - Apply rewrites `ds.config.yaml` in the skill's format. Comments in the file are not kept.
 - Changing an answer makes an earlier sign-off stale, so approve again after a change. The panel says so in a toast when it happens.
-- Approve writes the sign-off record in the project folder. Claude cannot write that record; only the Approve button or `/defsys approve`, typed by you, can.
+- Approve writes the sign-off record in the project folder. Claude is not given a way to write that record; only the Approve button or `/defsys approve`, typed by you, writes it.
 - A shell command that names the sign-off record is refused, even when it only writes documentation. Use the Write tool for documentation that mentions the record.
 - Linking to Claude Design attaches the design system to the project. It does not copy its tokens into `ds.config.yaml`; the skill's interview still builds the config.
 - A bare `/defsys` typed in full is not a command of this mod. Pick `defsystem:defsys` from the typeahead. The handler also answers the name `design-system-definer:defsys`, in case the engine resolves a typed `/defsys` to the separate plugin's command.
 - With the separate plugin enabled, its own `/design-system-definer:defsys` would also be answered by this panel. That is one more reason to keep the separate plugin disabled.
+
+## Limits of the sign-off gate
+
+The gate protects you from mistakes. It is not a security boundary against a model that is trying to get around it.
+
+- The shell guard reads the text of a command. A command that builds the record's file name at run time, or any other way of running code, is not recognised by it.
+- `build.py` does not check the sign-off itself. The sign-off is held by this mod, and the record is a file in the project folder.
+- A sign-off is only as trustworthy as the session. Do not run the mod with a model, a prompt or a project file you do not trust, and review what a build writes before you use it.
+
+What is enforced regardless of the sign-off: `build.py` accepts only the full `--approve` option (no shortened forms), and it refuses to write any file outside the folder given with `--out`.
 
 ## License
 
