@@ -65,8 +65,18 @@ def render_files(cfg, prims, collections, results, notes):
     return files
 
 
+def _safe_destination(out, rel):
+    """Resolve out/rel and refuse any file that would land outside the output folder."""
+    root = out.resolve()
+    dest = (root / rel).resolve()
+    if dest != root and root not in dest.parents:
+        raise ValueError(f"refusing to write outside the output folder: {rel!r}")
+    return dest
+
+
 def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+                                 allow_abbrev=False)
     ap.add_argument("config")
     ap.add_argument("--approve", action="store_true", help="designer signed off the brief; write files")
     ap.add_argument("--out", default="out")
@@ -92,8 +102,13 @@ def main(argv=None):
         return 1
     out = Path(args.out)
     files = render_files(cfg, prims, collections, results, notes)
+    try:
+        destinations = {rel: _safe_destination(out, rel) for rel in files}  # check every path before writing any
+    except ValueError as e:
+        print(f"config error: {e}", file=sys.stderr)
+        return 2
     for rel, body in files.items():
-        p = out / rel
+        p = destinations[rel]
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(body, encoding="utf-8", newline="\n")
     if args.previous:
